@@ -23,7 +23,7 @@ docker buildx create --use --name build-runner 2>/dev/null || docker buildx use 
 
 echo ""
 echo "Done. Next:"
-echo "  1. git clone https://github.com/YOU/chessonchain-build-server.git /opt/build-server"
-echo "  2. git clone your app into BUILD_REPO_PATH (e.g. /opt/chessonchain)"
-echo "  3. cp /opt/build-server/.env.example /opt/build-server/.env && nano .env"
-echo "  4. /opt/build-server/scripts/deploy.sh staging"
+echo "  1. git clone https://github.com/InCryptoEncrypted/chessonchain-build-server.git /opt/build-server"
+echo "  2. cp /opt/build-server/.env.example /opt/build-server/.env && nano .env"
+echo "  3. /opt/build-server/scripts/deploy.sh staging"
+echo "  4. (optional) systemd + GitHub webhook for auto deploy on push"

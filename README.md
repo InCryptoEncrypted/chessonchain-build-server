@@ -16,13 +16,13 @@ curl -fsSL https://raw.githubusercontent.com/incryptoencrypted/chessonchain-buil
 
 Or clone this repo and run `sudo ./scripts/install-prerequisites.sh`.
 
-### 2. Clone this repo + your app
+### 2. Clone **only** this repo
 
 ```bash
 git clone https://github.com/incryptoencrypted/chessonchain-build-server.git /opt/build-server
-git clone https://github.com/incryptoencrypted/chessonchain.git /opt/chessonchain
-cd /opt/chessonchain && git checkout develop
 ```
+
+The app (`chessonchain`) is cloned automatically on first deploy into `BUILD_REPO_PATH` — you do **not** need a separate chessonchain checkout.
 
 ### 3. Configure secrets
 
@@ -36,7 +36,8 @@ Required:
 
 | Variable | Description |
 |----------|-------------|
-| `BUILD_REPO_PATH` | Path to cloned app (`/opt/chessonchain`) |
+| `BUILD_REPO_URL` | App git URL (e.g. `https://github.com/incryptoencrypted/chessonchain.git`) |
+| `BUILD_REPO_PATH` | Where app is cloned/updated (cache dir, default `.cache/app`) |
 | `BUILD_BRANCH` | Branch to deploy (`develop` = staging) |
 | `BUILD_IMAGE` | GHCR image (`ghcr.io/incryptoencrypted/chessonchain`) |
 | `GITHUB_TOKEN` | PAT with `write:packages` |
@@ -57,28 +58,42 @@ BUILD_BRANCH=stable-master-01 BUILD_DEPLOY_TARGET=production /opt/build-server/s
 
 (Or set those in `.env`.)
 
-### 5. Auto-deploy on push (optional)
+### 5. Webhook setup (auto deploy on push)
+
+**On the build server:**
 
 ```bash
-# In .env:
-WEBHOOK_SECRET=$(openssl rand -hex 32)
-WEBHOOK_PORT=9876
+# 1. Generate a secret and add to .env
+openssl rand -hex 32
+# → paste into WEBHOOK_SECRET= in /opt/build-server/.env
 
-node /opt/build-server/scripts/webhook-listener.mjs
+# 2. Open port (or use nginx/Caddy later)
+ufw allow 9876/tcp
+
+# 3. Test listener (foreground)
+cd /opt/build-server && node scripts/webhook-listener.mjs
+# Should print: [webhook] /github on :9876 (branch develop → staging)
 ```
 
-GitHub → repo **Settings → Webhooks**:
+**On GitHub** (repo: `incryptoencrypted/chessonchain`):
 
-- URL: `http://YOUR_SERVER_IP:9876/github`
-- Secret: same as `WEBHOOK_SECRET`
-- Events: **Push**
+1. **Settings → Webhooks → Add webhook**
+2. **Payload URL:** `http://YOUR_CONTABO_IP:9876/github`
+3. **Content type:** `application/json`
+4. **Secret:** exact value of `WEBHOOK_SECRET` from `.env`
+5. **Which events:** Just the **push** event
+6. **Active:** checked → Add webhook
 
-Systemd (persistent):
+**Test:** Push to `develop` → GitHub **Recent Deliveries** should show `202 deploy started`. On the server, `deploy.sh` runs (clone/pull → build → GHCR → Coolify).
+
+**Keep it running (systemd):**
 
 ```bash
 cp /opt/build-server/systemd/build-webhook.service.example /etc/systemd/system/build-webhook.service
-# Edit WorkingDirectory + paths
+nano /etc/systemd/system/build-webhook.service   # WorkingDirectory=/opt/build-server
+systemctl daemon-reload
 systemctl enable --now build-webhook
+journalctl -u build-webhook -f
 ```
 
 ## What each script does

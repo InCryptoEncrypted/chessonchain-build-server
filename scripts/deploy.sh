@@ -14,8 +14,9 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 TARGET="${1:-${BUILD_DEPLOY_TARGET:-staging}}"
-REPO_PATH="${BUILD_REPO_PATH:?Set BUILD_REPO_PATH in .env}"
+REPO_PATH="${BUILD_REPO_PATH:-$ROOT/.cache/app}"
 BRANCH="${BUILD_BRANCH:-develop}"
+REPO_URL="${BUILD_REPO_URL:-}"
 IMAGE="${BUILD_IMAGE:?Set BUILD_IMAGE in .env}"
 ENV_SCRIPT="${BUILD_ENV_SCRIPT:-scripts/ci-build-env.mjs}"
 DOCKERFILE="${BUILD_DOCKERFILE:-Dockerfile}"
@@ -24,18 +25,27 @@ PLATFORM="${BUILD_PLATFORM:-linux/amd64}"
 : "${GITHUB_TOKEN:?Set GITHUB_TOKEN in .env}"
 : "${COOLIFY_DEPLOY_WEBHOOK:?Set COOLIFY_DEPLOY_WEBHOOK in .env}"
 : "${COOLIFY_TOKEN:?Set COOLIFY_TOKEN in .env}"
+: "${REPO_URL:?Set BUILD_REPO_URL in .env (app source — cloned automatically)}"
+
+mkdir -p "$(dirname "$REPO_PATH")"
 
 if [[ ! -d "$REPO_PATH/.git" ]]; then
-  echo "No git repo at BUILD_REPO_PATH=$REPO_PATH — clone your app first." >&2
-  exit 1
+  echo "==> clone app → $REPO_PATH"
+  # Token in URL for private repos (not echoed)
+  clone_url="$REPO_URL"
+  if [[ "$REPO_URL" == https://github.com/* ]]; then
+    clone_url="https://x-access-token:${GITHUB_TOKEN}@${REPO_URL#https://}"
+  fi
+  git clone --branch "$BRANCH" --single-branch "$clone_url" "$REPO_PATH"
+else
+  cd "$REPO_PATH"
+  echo "==> fetch $BRANCH @ $REPO_PATH"
+  git fetch origin "$BRANCH"
+  git checkout "$BRANCH"
+  git pull --ff-only origin "$BRANCH"
 fi
 
 cd "$REPO_PATH"
-
-echo "==> fetch $BRANCH @ $REPO_PATH"
-git fetch origin "$BRANCH"
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
 
 if [[ -f "$ENV_SCRIPT" ]]; then
   echo "==> write build env ($ENV_SCRIPT)"
