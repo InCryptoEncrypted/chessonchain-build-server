@@ -1,11 +1,6 @@
 #!/usr/bin/env node
 /**
- * GitHub push webhook → run scripts/deploy.sh
- *
- * Env (from .env or systemd):
- *   WEBHOOK_SECRET, WEBHOOK_PORT (9876), WEBHOOK_PATH (/github)
- *   BUILD_BRANCH, BUILD_DEPLOY_TARGET
- *   BUILD_SERVER_ENV — path to .env (optional)
+ * GitHub push → deploy staging (develop) or production (stable-master-01)
  */
 import crypto from "node:crypto"
 import { readFileSync, existsSync } from "node:fs"
@@ -19,7 +14,7 @@ const root = path.join(__dirname, "..")
 
 function loadDotEnv() {
   const envPath = process.env.BUILD_SERVER_ENV ?? path.join(root, ".env")
-  if (!existsSync(envPath)) return
+  if (!existsSync(envPath)) return envPath
   for (const line of readFileSync(envPath, "utf8").split("\n")) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith("#")) continue
@@ -32,21 +27,30 @@ function loadDotEnv() {
     }
     if (process.env[key] == null) process.env[key] = val
   }
+  return envPath
 }
 
-loadDotEnv()
+const envPath = loadDotEnv()
 
 const secret = process.env.WEBHOOK_SECRET?.trim()
 const port = Number(process.env.WEBHOOK_PORT ?? 9876)
 const webhookPath = process.env.WEBHOOK_PATH?.trim() || "/github"
-const deployBranch = process.env.BUILD_BRANCH?.trim() || "develop"
-const target = process.env.BUILD_DEPLOY_TARGET?.trim() || "staging"
+
+const stagingBranch = process.env.STAGING_BRANCH?.trim() || "develop"
+const productionBranch = process.env.PRODUCTION_BRANCH?.trim() || "stable-master-01"
+
+/** @type {Map<string, string>} */
+const refToTarget = new Map([
+  [`refs/heads/${stagingBranch}`, "staging"],
+  [`refs/heads/${productionBranch}`, "production"],
+])
 
 let deploying = false
+let currentTarget = null
 
 function verifySignature(body, sigHeader) {
   if (!secret) {
-    console.warn("[webhook] WEBHOOK_SECRET unset — accepting all requests (not for production)")
+    console.warn("[webhook] WEBHOOK_SECRET unset — not recommended for production")
     return true
   }
   if (!sigHeader?.startsWith("sha256=")) return false
@@ -59,21 +63,23 @@ function verifySignature(body, sigHeader) {
   }
 }
 
-function runDeploy() {
+function runDeploy(target) {
   if (deploying) {
-    console.log("[webhook] deploy already running — skip")
+    console.log(`[webhook] deploy already running (${currentTarget}) — skip ${target}`)
     return
   }
   deploying = true
+  currentTarget = target
   const script = path.join(root, "scripts", "deploy.sh")
   const child = spawn("bash", [script, target], {
     cwd: root,
     stdio: "inherit",
-    env: { ...process.env, BUILD_SERVER_ENV: process.env.BUILD_SERVER_ENV ?? path.join(root, ".env") },
+    env: { ...process.env, BUILD_SERVER_ENV: envPath },
   })
   child.on("close", (code) => {
     deploying = false
-    console.log(`[webhook] deploy exited ${code}`)
+    currentTarget = null
+    console.log(`[webhook] ${target} deploy exited ${code}`)
   })
 }
 
@@ -111,20 +117,22 @@ const server = http.createServer((req, res) => {
     }
 
     const ref = payload.ref ?? ""
-    const expectedRef = `refs/heads/${deployBranch}`
-    if (ref !== expectedRef) {
+    const target = refToTarget.get(ref)
+    if (!target) {
       res.writeHead(200)
-      res.end(`ignored ref ${ref}`)
+      res.end(`ignored ${ref}`)
       return
     }
 
-    console.log(`[webhook] push to ${deployBranch} → deploy ${target}`)
-    runDeploy()
+    console.log(`[webhook] ${ref} → deploy ${target}`)
+    runDeploy(target)
     res.writeHead(202)
-    res.end("deploy started")
+    res.end(`deploy ${target} started`)
   })
 })
 
 server.listen(port, () => {
-  console.log(`[webhook] ${webhookPath} on :${port} (branch ${deployBranch} → ${target})`)
+  console.log(`[webhook] ${webhookPath}:${port}`)
+  console.log(`  ${stagingBranch} → staging`)
+  console.log(`  ${productionBranch} → production`)
 })

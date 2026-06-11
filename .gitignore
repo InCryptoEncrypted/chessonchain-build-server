@@ -1,4 +1,5 @@
 .env
+buildserver.env
 *.env
-!*.env.example
+!buildserver.env.example
 .DS_Store
